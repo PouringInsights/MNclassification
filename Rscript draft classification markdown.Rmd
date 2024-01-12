@@ -1,0 +1,410 @@
+---
+title: "Classification"
+author: "yourname"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(tidyverse)
+library(tm)
+library(RColorBrewer)
+library(wordcloud)
+library(e1071)
+library(nnet)
+library(tokenizers)
+library(SnowballC)
+
+```
+
+```{r}
+clean_text <- function(text) {
+  
+  # Tokenize text
+  tokenize_text <- function(text) {
+    unlist(tokenize_words(text))
+  }
+  
+  # Preprocessing text
+  preprocessing_text <- function(text) {
+    text <- tolower(text)
+    text <- gsub('\n', ' ', text)
+    text <- gsub('\u00A0', ' ', text, fixed = TRUE)
+    text <- gsub('-', ' ', text)
+    text <- gsub('ó', 'o', text)
+    text <- gsub('ğ', 'g', text)
+    text <- gsub('á', 'a', text)
+    text <- gsub("'", ' ', text)
+    text <- gsub('\\d+', '', text)
+    text <- gsub('http\\S+', '', text)
+    text <- gsub('[^a-zA-Z,\\d]', ' ', text)
+    text <- gsub('\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b', '', text)
+    text <- gsub('[/(){}\\[\\]\\|@,;]', ' ', text)
+    text <- gsub('\\W*\\b\\w{1,4}\\b\\d', '', text)
+    text <- gsub(' ', '', text)  # Remove extra spaces
+    text <- gsub(' +', ' ', text)  # Remove multiple spaces
+    text <- gsub('\\b\\w{1,4}\\b', '', text)
+    text <- gsub('^\\s+|\\s+$', '', text)  # Trim leading and trailing whitespaces
+    return(text)
+  }
+  
+  # Remove special characters
+  remove_special_characters <- function(text, characters) {
+    tokens <- tokenize_text(text)
+    pattern <- paste0('[', gsub('[-]', '\\-', characters), '0123456789]')
+    pattern <- gsub(']', '\\]', pattern)
+    pattern <- gsub('-', '\\-', pattern)
+    pattern <- paste0('[', pattern, ']')
+    return(paste(tokens[!grepl(pattern, tokens)], collapse = ' '))
+  }
+  
+  # Stem text
+  stem_text <- function(text) {
+    tokens <- tokenize_text(text)
+    return(paste(sapply(tokens, wordStem), collapse = ' '))
+  }
+  
+  # Lemmatize text
+  lemm_text <- function(text) {
+    tokens <- tokenize_text(text)
+    return(paste(sapply(tokens, wordStem), collapse = ' '))
+  }
+  
+  # Remove stopwords
+  remove_stopwords <- function(text, stop_words) {
+    tokens <- tokenize_text(text)
+    return(paste(tokens[!tokens %in% stop_words], collapse = ' '))
+  }
+  
+  # Define default stopwords
+  default_stopwords <- c(stopwords("en"), 'said', 'would', 'even', 'according', 'could', 'year',
+                         'years', 'also', 'new', 'people', 'old', 'one', 'two', 'time',
+                         'first', 'last', 'say', 'make', 'best', 'get', 'three', 'make',
+                         'year old', 'told', 'made', 'like', 'take', 'many', 'set', 'number',
+                         'month', 'week', 'well', 'back')
+  
+  # Apply text cleaning steps
+  text <- text %>%
+    tolower() %>%
+    preprocessing_text() %>%
+    remove_special_characters(characters = '[-]') %>%
+    lemm_text() %>%
+    remove_stopwords(stop_words = default_stopwords)
+  
+  return(text)
+}
+```
+Example:
+
+```{r}
+text_to_clean <- "Virginia mom charged with murder in 2-year-old son's death"
+cleaned_text <- clean_text(text_to_clean)
+print(cleaned_text)
+```
+
+```{r}
+# Set the working directory
+setwd("C:/Giang/work/Data-coursework/INF6027/TY18923")
+
+# Read the CSV file into an R dataframe
+df <- read_csv('MN-DS-news-classification.csv')
+
+# Display the first few rows of the dataframe
+head(df)
+
+```
+
+```{r}
+
+# Count of rows
+nrow_df <- nrow(df)
+
+# Number of unique values in 'category_level_1' and 'category_level_2'
+unique_category_level_1 <- length(unique(df$category_level_1))
+unique_category_level_2 <- length(unique(df$category_level_2))
+
+# Number of unique values in 'source'
+unique_source <- length(unique(df$source))
+
+# Column names
+column_names <- names(df)
+
+# Group by 'category_level_1' and count
+count_by_category_level_1 <- aggregate(data_id ~ category_level_1, df, length)
+
+# Create a new column 'combined_categories'
+df$combined_categories <- apply(df[, c('category_level_1', 'category_level_2')], 1, function(x) paste(x, collapse = ' . '))
+
+# Create a new column 'text'
+df$text <- apply(df[, c('title', 'content')], 1, function(x) paste(x, collapse = ' . '))
+
+# Apply the 'clean_text' function to the 'text' column
+df$text <- sapply(df$text, clean_text)
+```
+
+
+```{r}
+# Install and load required R packages
+show_wordcloud <- function(text, title = NULL) {
+  wordcloud(words = names(table(unlist(strsplit(text, " ")))), freq = table(unlist(strsplit(text, " "))),
+            scale = c(2, 0.5), min.freq = 1, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
+
+  if (!is.null(title)) {
+    title(main = title, cex.main = 1.5)
+  }
+}
+
+
+```
+
+```{r}
+# Install and load required R packages
+library(wordcloud)
+library(gridExtra)
+
+# Define R function for displaying a word cloud
+# Define R function for displaying a word cloud with title
+show_wordcloud <- function(text, title = NULL) {
+  word_freq <- table(unlist(strsplit(text, " ")))
+  # Limit the number of words based on frequency
+  top_words <- names(head(sort(word_freq, decreasing = TRUE), 200))
+  
+  wordcloud(words = top_words,
+            freq = word_freq[top_words],
+            scale = c(2, 0.5),  # Adjust the scale to reduce the size
+            min.freq = 5,       # Adjust min.freq to control the number of words
+            random.order = FALSE,
+            colors = brewer.pal(8, "Dark2"),
+            main = title)
+}
+
+# Generate word clouds for each category
+unique_categories <- unique(df$category_level_1)
+```
+
+
+```{r}
+for (category in unique_categories) {
+  subset_data <- df[df$category_level == category, ]
+  text_combined <- paste(subset_data$text, collapse = ' ')
+  show_wordcloud(text_combined, title = paste("Category level 1: ", category))
+}
+```
+
+
+```{r}
+# Assuming 'df' is your data frame
+# Load necessary libraries
+
+# Split the data
+set.seed(123)
+train_indices <- sample(1:nrow(df), 0.8 * nrow(df))
+train_data <- df[train_indices, ]
+test_data <- df[-train_indices, ]
+
+# Create a corpus
+corpus <- Corpus(VectorSource(train_data$text))
+
+# Preprocess and create a document-term matrix
+control <- list(tokenize = function(x) unlist(strsplit(x, ' ')),
+                removePunctuation = TRUE,
+                stopwords = stopwords("en"),
+                Boost_tokenizer = TRUE,
+                removeNumbers = TRUE,
+                tolower = TRUE,
+                stemming = TRUE)
+dtm <- DocumentTermMatrix(corpus, control = control)
+
+# Use TF-IDF
+dtm_tfidf <- weightTfIdf(dtm)
+tfidf <- as.matrix(dtm_tfidf)
+# Encode labels
+y_encoded <- as.factor(train_data$category_level_1)
+
+# Train SVM model
+svm_model <- svm(tfidf, y_encoded)
+
+# Create a test corpus
+test_corpus <- Corpus(VectorSource(test_data$text))
+
+# Preprocess and create a test document-term matrix
+test_dtm <- DocumentTermMatrix(test_corpus, control = control)
+test_dtm_tfidf <- weightTfIdf(test_dtm)
+
+# Predictions
+predictions <- predict(svm_model, test_dtm_tfidf)
+
+# Evaluate
+confusion_matrix <- table(predictions, test_data$category_level_1)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+
+```
+# Subset data
+```{r}
+# Assuming 'df' is your data frame
+# Load necessary libraries
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Sample a smaller subset of your data (e.g., 20%)
+subset_indices <- sample(1:nrow(df), 0.2 * nrow(df))
+subset_data <- df[subset_indices, ]
+
+# Split the subset data
+train_indices <- sample(1:nrow(subset_data), 0.8 * nrow(subset_data))
+train_data <- subset_data[train_indices, ]
+test_data <- subset_data[-train_indices, ]
+
+# Create a corpus
+corpus <- Corpus(VectorSource(train_data$text))
+
+# Preprocess and create a document-term matrix
+control <- list(tokenize = function(x) unlist(strsplit(x, ' ')),
+                removePunctuation = TRUE,
+                stopwords = stopwords("en"),
+                Boost_tokenizer = TRUE,
+                removeNumbers = TRUE,
+                tolower = TRUE,
+                stemming = TRUE)
+dtm <- DocumentTermMatrix(corpus, control = control)
+
+# Use TF-IDF
+dtm_tfidf <- weightTfIdf(dtm)
+tfidf <- as.matrix(dtm_tfidf)
+
+# Encode labels
+y_encoded <- as.factor(train_data$category_level_1)
+
+# Train SVM model
+svm_model <- svm(tfidf, y_encoded)
+
+# Create a test corpus
+test_corpus <- Corpus(VectorSource(test_data$text))
+
+# Preprocess and create a test document-term matrix
+test_dtm <- DocumentTermMatrix(test_corpus, control = control)
+test_dtm_tfidf <- weightTfIdf(test_dtm)
+test_dtm_tfidf <- removeSparseTerms(test_dtm_tfidf, 0.98)
+
+# Make sure the number of features (columns) matches
+common_colnames <- intersect(colnames(tfidf), colnames(test_dtm_tfidf))
+dim_tfidf_subset <- dim(test_dtm_tfidf[, common_colnames])
+
+  test_matrix <- as.matrix(test_dtm_tfidf)
+
+dim(test_matrix)  # Check dimensions of test_matrix
+
+
+dim(tfidf)  # Check dimensions of tfidf
+dim(test_matrix) 
+# Predictions
+predictions <- predict(svm_model, test_matrix)
+
+# Evaluate
+confusion_matrix <- table(predictions, test_data$category_level_1)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+
+```
+```{r}
+# Example using a different algorithm (e.g., random forest)
+library(randomForest)
+# Assuming dtm_matrix is your document-term matrix
+library(slam)
+
+# Calculate TF-IDF values
+library(slam)
+dtm_matrix <- as.matrix(dtm)
+# Assuming dtm_matrix is your document-term matrix
+tf_matrix <- row_sums(dtm_matrix)
+idf_vector <- log2((ncol(dtm_matrix) + 1) / (row_sums(dtm_matrix > 0) + 1)) + 1
+
+# Calculate TF-IDF values
+tfidf_values <- as(dtm_matrix, "CsparseMatrix") * sparseMatrix(i = rep(1:nrow(dtm_matrix), each = ncol(dtm_matrix)),
+                                                                 j = rep(1:ncol(dtm_matrix), times = nrow(dtm_matrix)),
+                                                                 x = as.vector(dtm_matrix) * tf_matrix / idf_vector)
+
+# Convert to a matrix
+X_tfidf <- as.matrix(tfidf_values)
+
+
+# Convert to a matrix
+X_tfidf <- as.matrix(tfidf_values)
+
+# Now you can use X_tfidf in the randomForest function
+rf_model <- randomForest(X_tfidf, y_encoded)
+
+# Assuming X_tfidf is your feature matrix, and y_encoded is your response variable
+rf_model <- randomForest(X_tfidf, y_encoded)
+
+# Make predictions
+rf_predictions <- predict(rf_model, newdata = X_tfidf)
+
+# Evaluate the model
+confusion_matrix <- table(rf_predictions, y_encoded)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+```
+
+```{r}
+# Assuming you have a data frame named 'df' with 'text' and 'category_level_1' columns
+# Adjust column names accordingly based on your actual data
+
+library(tm)
+library(glmnet)
+
+# Create a corpus
+corpus <- Corpus(VectorSource(df$text))
+
+# Preprocess and create a document-term matrix
+clean_control <- list(
+  tokenize = function(x) unlist(strsplit(x, ' ')),
+  removePunctuation = TRUE,
+  stopwords = stopwords("en"),
+  removeNumbers = TRUE,
+  tolower = TRUE,
+  stemming = TRUE
+)
+
+dtm <- DocumentTermMatrix(corpus, control = clean_control)
+
+# Use TF-IDF
+dtm_tfidf <- weightTfIdf(dtm)
+
+# Encode labels
+y_encoded <- as.factor(df$category_level_1)
+
+# Train the glmnet model with binomial family
+model <- glmnet(as.matrix(dtm_tfidf), y_encoded, family = 'binomial', alpha = 0.5, lambda = 0.01)
+
+
+# Create a test corpus
+test_corpus <- Corpus(VectorSource(test_data$text))
+
+# Preprocess and create a test document-term matrix
+test_dtm <- DocumentTermMatrix(test_corpus, control = clean_control)
+test_dtm_tfidf <- weightTfIdf(test_dtm)
+
+# Predictions
+predictions <- predict(model, newx = as.matrix(test_dtm_tfidf), type = 'response')
+
+# Convert predictions to labels (assuming a binary classification task)
+predicted_labels <- ifelse(predictions > 0.5, "Category_A", "Category_B")
+
+# Evaluate
+confusion_matrix <- table(predicted_labels, test_data$category_level_1)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+```
+
